@@ -64,7 +64,7 @@ pipeline {
               snyk config set disableSuggestions=true
           '''
     
-          // Étape 1 : vérifier que Jenkins "voit" bien l'image Docker
+          // Vérif image
           bat '''
             echo === Docker images (filter) ===
             docker images | findstr /I "asecurityguru testeb" || exit /b 0
@@ -73,15 +73,18 @@ pipeline {
             docker inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || echo IMAGE_NOT_FOUND
           '''
     
-          // Étape 2 : Container scan avec debug Snyk
+          // Scan Snyk avec debug (écrit dans un fichier)
           bat '''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -e DOCKER_HOST=npipe:////./pipe/docker_engine ^
-              -e SNYK_DEBUG=1 ^
+              -e SNYK_LOG_LEVEL=debug ^
               -v //./pipe/docker_engine://./pipe/docker_engine ^
               snyk/snyk:docker ^
-              snyk container test %IMAGE_NAME% --severity-threshold=high || exit /b 0
+              snyk -d container test %IMAGE_NAME% --severity-threshold=high > snyk_container_debug.txt 2>&1 ^&^& exit /b 0
+    
+            echo === Snyk debug extract (last 80 lines) ===
+            powershell -NoProfile -Command "Get-Content snyk_container_debug.txt -Tail 80"
           '''
         }
       }
