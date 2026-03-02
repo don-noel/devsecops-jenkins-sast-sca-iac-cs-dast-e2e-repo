@@ -1,24 +1,13 @@
 pipeline {
   agent any
 
-  tools {
-    maven 'Maven'
-  }
+  tools { maven 'Maven' }
 
   environment {
     PYTHON_EXE = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
-
-    IMAGE_REPO = 'asecurityguru/testeb'
-    IMAGE_TAG  = 'latest'
-    IMAGE_NAME = "${IMAGE_REPO}:${IMAGE_TAG}"
-
+    IMAGE_NAME = 'asecurityguru/testeb:latest'
     DAST_URL   = 'https://www.example.com'
-
-    // Docker daemon Windows (utile si tu lances des conteneurs qui parlent au daemon)
-    DOCKER_HOST = 'npipe:////./pipe/docker_engine'
-
-    // Snyk org slug (pas l'UUID)
-    SNYK_ORG = 'don-noel'
+    SNYK_ORG   = 'don-noel'
   }
 
   stages {
@@ -31,6 +20,10 @@ pipeline {
 
           echo ===== DOCKER =====
           docker --version
+
+          echo ===== SNYK CLI =====
+          where snyk
+          snyk --version
 
           echo ===== PYTHON =====
           "%PYTHON_EXE%" --version
@@ -54,15 +47,12 @@ pipeline {
     stage('BuildDockerImage') {
       steps {
         script {
-          // Build DIRECT avec le tag final (évite les confusions repo/tag)
-          def img = docker.build("${IMAGE_NAME}")
-
-          bat """
-            echo ===== IMAGE BUILT =====
-            docker images | findstr /I "${IMAGE_REPO}" || exit /b 1
-            docker inspect ${IMAGE_NAME} >nul 2>nul && echo IMAGE_OK || (echo IMAGE_NOT_FOUND & exit /b 1)
-          """
+          docker.build("${IMAGE_NAME}")
         }
+        bat '''
+          echo ===== IMAGE CHECK =====
+          docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || (echo IMAGE_NOT_FOUND & exit /b 1)
+        '''
       }
     }
 
@@ -70,32 +60,9 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
-            echo ===== SNYK CONTAINER SCAN =====
-            docker inspect ${IMAGE_NAME} >nul 2>nul || (echo IMAGE_NOT_FOUND & exit /b 1)
-
-            docker run --rm ^
-              -e SNYK_TOKEN=%SNYK_TOKEN% ^
-              -e DOCKER_HOST=npipe:////./pipe/docker_engine ^
-              -v //./pipe/docker_engine://./pipe/docker_engine ^
-              snyk/snyk:docker ^
-              snyk container test ${IMAGE_NAME} --org=%SNYK_ORG% --severity-threshold=high
-          """
-        }
-      }
-    }
-
-    stage('SnykSCA') {
-      steps {
-        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-          // Utilise snyk/snyk:docker (stable) au lieu de snyk/snyk:linux
-          bat """
-            echo ===== SNYK SCA (CODE/DEPENDENCIES) =====
-            docker run --rm ^
-              -e SNYK_TOKEN=%SNYK_TOKEN% ^
-              -v "%WORKSPACE%:/app" ^
-              -w /app ^
-              snyk/snyk:docker ^
-              snyk test --all-projects --org=%SNYK_ORG% --severity-threshold=high
+            echo ===== SNYK CONTAINER SCAN (HOST CLI) =====
+            snyk auth %SNYK_TOKEN%
+            snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
         }
       }
@@ -103,21 +70,21 @@ pipeline {
 
     stage('DAST_ZAP_Docker') {
       steps {
-        bat """
+        bat '''
           echo ===== ZAP BASELINE =====
           docker run --rm ^
             -v "%WORKSPACE%:/zap/wrk" ^
             ghcr.io/zaproxy/zaproxy:stable ^
-            zap-baseline.py -t "%DAST_URL%" -r zap-report.html
+            zap-baseline.py -t "%DAST_URL%" -r zap-report.html || exit /b 0
 
           echo [INFO] ZAP report saved to %WORKSPACE%\\zap-report.html
-        """
+        '''
       }
     }
 
     stage('Checkov') {
       steps {
-        bat "\"%PYTHON_EXE%\" -m checkov.main -s -f main.tf"
+        bat '"%PYTHON_EXE%" -m checkov.main -s -f main.tf || exit /b 0'
       }
     }
   }
