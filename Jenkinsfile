@@ -6,17 +6,37 @@ pipeline {
   }
 
   environment {
-    // ✅ Mets ici ton chemin EXACT python (celui qui marche chez toi)
+    // ✅ Mets le chemin EXACT de python.exe (celui qui marche en CMD)
     PYTHON_EXE = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
 
-    // Nom image docker
+    // Image docker construite localement
     IMAGE_NAME = 'asecurityguru/testeb:latest'
 
-    // URL de test pour ZAP
+    // URL DAST
     DAST_URL = 'https://www.example.com'
   }
 
   stages {
+
+    stage('VerifyTools') {
+      steps {
+        bat """
+          echo ===== WORKSPACE =====
+          echo %WORKSPACE%
+          echo ===== PATH (Jenkins) =====
+          echo %PATH%
+          echo ===== DOCKER =====
+          docker --version
+          echo ===== PYTHON =====
+          "%PYTHON_EXE%" --version
+          "%PYTHON_EXE%" -m pip --version
+          "%PYTHON_EXE%" -m checkov.main -v
+          echo ===== FILES =====
+          dir
+          if exist main.tf (echo main.tf OK) else (echo main.tf NOT FOUND)
+        """
+      }
+    }
 
     stage('CompileandRunSonarAnalysis') {
       steps {
@@ -30,18 +50,16 @@ pipeline {
       steps {
         withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
           script {
-            def app = docker.build("asecurityguru/testeb:latest")
+            docker.build("${IMAGE_NAME}")
           }
         }
       }
     }
 
-    // ✅ Container Scan (Snyk) - accès à l'image locale (Windows Docker Engine pipe)
     stage('SnykContainerScan') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
 
-          // Optionnel: couper suggestions
           bat('''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
@@ -49,7 +67,7 @@ pipeline {
               snyk config set disableSuggestions=true
           ''')
 
-          // ✅ IMPORTANT: monter le docker engine pipe pour que Snyk voie les images locales
+          // ✅ Monte le Docker Engine pipe pour que le conteneur Snyk voie l'image locale
           bat('''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
@@ -61,7 +79,6 @@ pipeline {
       }
     }
 
-    // ✅ WhoAmI (si tu veux garder)
     stage('SnykWhoAmI') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
@@ -75,7 +92,6 @@ pipeline {
       }
     }
 
-    // ✅ SCA (Java/Maven) : utilise une image qui a Maven + Java pour éviter exit code -2
     stage('SnykSCA') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
@@ -85,13 +101,12 @@ pipeline {
               -v "%WORKSPACE%:/app" ^
               -w /app ^
               maven:3.9-eclipse-temurin-17 ^
-              bash -lc "mvn -q -DskipTests dependency:tree && curl -sSL https://static.snyk.io/cli/latest/snyk-linux -o /usr/local/bin/snyk && chmod +x /usr/local/bin/snyk && snyk test --all-projects || true"
+              bash -lc "mvn -q -DskipTests dependency:tree || true; curl -sSL https://static.snyk.io/cli/latest/snyk-linux -o /usr/local/bin/snyk && chmod +x /usr/local/bin/snyk && snyk test --all-projects || true"
           ''')
         }
       }
     }
 
-    // ✅ DAST ZAP via Docker (plus besoin de C:\zap)
     stage('DAST_ZAP_Docker') {
       steps {
         bat('''
@@ -105,7 +120,6 @@ pipeline {
       }
     }
 
-    // ✅ Checkov : Jenkins ne reconnait pas "py" => appeler python.exe direct
     stage('Checkov') {
       steps {
         bat('"%PYTHON_EXE%" -m checkov.main -s -f main.tf || exit /b 0')
