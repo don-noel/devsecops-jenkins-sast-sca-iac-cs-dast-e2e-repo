@@ -105,9 +105,9 @@ pipeline {
       }
     }
 
-    stage('checkov') {
+    stage('Checkov') {
       steps {
-        bat("checkov -s -f main.tf || exit /b 0")
+        bat 'py -m checkov.main -s -f main.tf || exit /b 0'
       }
     }
   }
