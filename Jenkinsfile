@@ -73,11 +73,12 @@ pipeline {
             docker inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || echo IMAGE_NOT_FOUND
           '''
     
-          // Container scan - accès Docker Windows via npipe + montage pipe
+          // Étape 2 : Container scan avec debug Snyk
           bat '''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -e DOCKER_HOST=npipe:////./pipe/docker_engine ^
+              -e SNYK_DEBUG=1 ^
               -v //./pipe/docker_engine://./pipe/docker_engine ^
               snyk/snyk:docker ^
               snyk container test %IMAGE_NAME% --severity-threshold=high || exit /b 0
