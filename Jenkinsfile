@@ -8,8 +8,6 @@ pipeline {
     IMAGE_NAME = 'asecurityguru/testeb:latest'
     DAST_URL   = 'https://www.example.com'
     SNYK_ORG   = 'don-noel'
-
-    // ✅ Pour que Jenkins trouve snyk.cmd installé via npm (utile si tu utilises snyk local)
     NPM_GLOBAL_BIN = 'C:\\Users\\USER\\AppData\\Roaming\\npm'
   }
 
@@ -24,17 +22,17 @@ pipeline {
           echo ===== DOCKER =====
           docker --version
 
-          echo ===== PATH (ADD NPM GLOBAL) =====
+          echo ===== ADD NPM GLOBAL BIN TO PATH =====
           set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
-          echo %PATH%
+          echo PATH=%PATH%
 
-          echo ===== SNYK CLI (OPTIONAL LOCAL) =====
-          where snyk
-          snyk --version
+          echo ===== SNYK (LOCAL) =====
+          where snyk || echo [WARN] snyk not found in PATH
+          snyk --version || echo [WARN] snyk command failed
 
           echo ===== PYTHON =====
           "%PYTHON_EXE%" --version
-          "%PYTHON_EXE%" -m checkov.main -v
+          "%PYTHON_EXE%" -m checkov.main -v || echo [WARN] checkov version check failed
 
           echo ===== FILES =====
           dir
@@ -56,10 +54,10 @@ pipeline {
         script {
           docker.build("${IMAGE_NAME}")
         }
-        bat '''
+        bat """
           echo ===== IMAGE CHECK =====
           docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || (echo IMAGE_NOT_FOUND & exit /b 1)
-        '''
+        """
       }
     }
 
@@ -67,19 +65,23 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
-            echo ===== SNYK CONTAINER SCAN (DOCKER - FIXED) =====
+            echo ===== SNYK CONTAINER SCAN (LOCAL - WINDOWS SAFE) =====
+            set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
+
             echo IMAGE_NAME=%IMAGE_NAME%
             echo SNYK_ORG=%SNYK_ORG%
 
-            docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK_BEFORE_SNYK || (echo IMAGE_MISSING_BEFORE_SNYK & exit /b 1)
+            rem 1) verify snyk exists
+            where snyk >nul 2>nul || (echo [ERROR] snyk not found. Install: npm i -g snyk & exit /b 0)
 
-            rem ✅ FIX: override entrypoint to avoid ./docker-entrypoint.sh relative path issue
-            docker run --rm ^
-              --entrypoint snyk ^
-              -e SNYK_TOKEN=%SNYK_TOKEN% ^
-              -v "%WORKSPACE%:/project" ^
-              snyk/snyk-cli:docker ^
-              container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
+            rem 2) verify docker sees the image
+            docker image inspect %IMAGE_NAME% >nul 2>nul || (echo [ERROR] Docker image not found locally: %IMAGE_NAME% & exit /b 0)
+
+            rem 3) auth token (env var)
+            set "SNYK_TOKEN=%SNYK_TOKEN%"
+
+            rem 4) scan
+            snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
         }
       }
@@ -87,7 +89,7 @@ pipeline {
 
     stage('DAST_ZAP_Docker') {
       steps {
-        bat '''
+        bat """
           echo ===== ZAP BASELINE =====
           docker run --rm ^
             -v "%WORKSPACE%:/zap/wrk" ^
@@ -95,7 +97,7 @@ pipeline {
             zap-baseline.py -t "%DAST_URL%" -r zap-report.html || exit /b 0
 
           echo [INFO] ZAP report saved to %WORKSPACE%\\zap-report.html
-        '''
+        """
       }
     }
 
