@@ -73,9 +73,10 @@ pipeline {
     
             docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK_BEFORE_SNYK || (echo IMAGE_MISSING_BEFORE_SNYK & exit /b 1)
     
-            rem Lancer Snyk dans Docker (pas besoin de snyk/npx local)
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
+              -v "%WORKSPACE%:/project" ^
+              -w /project ^
               snyk/snyk-cli:docker ^
               snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
