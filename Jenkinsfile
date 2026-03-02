@@ -55,15 +55,24 @@ pipeline {
     stage('SnykContainerScan') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-
-          // (optionnel) config
+    
+          // (optionnel) config Snyk (dans le conteneur)
           bat '''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               snyk/snyk:docker ^
               snyk config set disableSuggestions=true
           '''
-
+    
+          // Étape 1 : vérifier que Jenkins "voit" bien l'image Docker
+          bat '''
+            echo === Docker images (filter) ===
+            docker images | findstr /I "asecurityguru testeb" || exit /b 0
+    
+            echo === Docker inspect IMAGE_NAME ===
+            docker inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || echo IMAGE_NOT_FOUND
+          '''
+    
           // Container scan - accès Docker Windows via npipe + montage pipe
           bat '''
             docker run --rm ^
