@@ -68,12 +68,15 @@ pipeline {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
             echo ===== SNYK CONTAINER SCAN (HOST CLI) =====
-            set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
-
-            rem ✅ IMPORTANT: pas de 'snyk auth' dans Jenkins
-            rem Snyk lit automatiquement SNYK_TOKEN
+    
+            echo IMAGE_NAME=%IMAGE_NAME%
+            echo SNYK_ORG=%SNYK_ORG%
+    
+            docker info | findstr /i "Server Version" || (echo DOCKER_NOT_ACCESSIBLE & exit /b 1)
+            docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK_BEFORE_SNYK || (echo IMAGE_MISSING_BEFORE_SNYK & exit /b 1)
+    
             set "SNYK_TOKEN=%SNYK_TOKEN%"
-
+    
             snyk --version
             snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
