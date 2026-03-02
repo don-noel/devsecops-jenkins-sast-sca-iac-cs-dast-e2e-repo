@@ -78,13 +78,12 @@ pipeline {
 
     stage('RunDASTUsingZAP') {
       steps {
-        // Pour l’instant, exemple. On va remplacer par EasyBuggy dès que le stage s’exécute bien.
         bat('''
-          C:\\zap\\ZAP_2.12.0_Crossplatform\\ZAP_2.12.0\\zap.sh ^
-            -port 9393 -cmd ^
-            -quickurl https://www.example.com ^
+          "C:\\zap\\ZAP_2.12.0_Crossplatform\\ZAP_2.12.0\\zap.bat" ^
+            -cmd -port 9393 ^
+            -quickurl "https://www.example.com" ^
             -quickprogress ^
-            -quickout C:\\zap\\ZAP_2.12.0_Crossplatform\\ZAP_2.12.0\\Output.html
+            -quickout "C:\\zap\\Output.html"
         ''')
       }
     }
