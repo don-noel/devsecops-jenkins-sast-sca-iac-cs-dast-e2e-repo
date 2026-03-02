@@ -8,6 +8,9 @@ pipeline {
     IMAGE_NAME = 'asecurityguru/testeb:latest'
     DAST_URL   = 'https://www.example.com'
     SNYK_ORG   = 'don-noel'
+
+    // ✅ Pour que Jenkins trouve snyk.cmd installé via npm
+    NPM_GLOBAL_BIN = 'C:\\Users\\USER\\AppData\\Roaming\\npm'
   }
 
   stages {
@@ -20,6 +23,10 @@ pipeline {
 
           echo ===== DOCKER =====
           docker --version
+
+          echo ===== PATH (ADD NPM GLOBAL) =====
+          set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
+          echo %PATH%
 
           echo ===== SNYK CLI =====
           where snyk
@@ -61,7 +68,13 @@ pipeline {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
             echo ===== SNYK CONTAINER SCAN (HOST CLI) =====
-            snyk auth %SNYK_TOKEN%
+            set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
+
+            rem ✅ IMPORTANT: pas de 'snyk auth' dans Jenkins
+            rem Snyk lit automatiquement SNYK_TOKEN
+            set "SNYK_TOKEN=%SNYK_TOKEN%"
+
+            snyk --version
             snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
         }
