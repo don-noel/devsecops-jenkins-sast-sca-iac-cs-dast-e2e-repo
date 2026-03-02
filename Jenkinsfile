@@ -8,17 +8,16 @@ pipeline {
   environment {
     PYTHON_EXE = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
 
-    // ✅ IMPORTANT: repo sans tag pour build(), tag séparé
     IMAGE_REPO = 'asecurityguru/testeb'
     IMAGE_TAG  = 'latest'
     IMAGE_NAME = "${IMAGE_REPO}:${IMAGE_TAG}"
 
     DAST_URL   = 'https://www.example.com'
 
-    // Docker daemon Windows
+    // Docker daemon Windows (utile si tu lances des conteneurs qui parlent au daemon)
     DOCKER_HOST = 'npipe:////./pipe/docker_engine'
 
-    // ✅ Mets ici le VRAI slug de ton org Snyk
+    // Snyk org slug (pas l'UUID)
     SNYK_ORG = 'don-noel'
   }
 
@@ -55,34 +54,25 @@ pipeline {
     stage('BuildDockerImage') {
       steps {
         script {
-          // ✅ build avec repo sans tag
-          def img = docker.build("${IMAGE_REPO}")
+          // Build DIRECT avec le tag final (évite les confusions repo/tag)
+          def img = docker.build("${IMAGE_NAME}")
 
-          // ✅ tag latest explicitement
-          bat "docker tag ${IMAGE_REPO}:latest ${IMAGE_NAME}"
-
-          // ✅ confirme que l'image existe
           bat """
             echo ===== IMAGE BUILT =====
             docker images | findstr /I "${IMAGE_REPO}" || exit /b 1
             docker inspect ${IMAGE_NAME} >nul 2>nul && echo IMAGE_OK || (echo IMAGE_NOT_FOUND & exit /b 1)
           """
         }
-
-        // (optionnel) push si tu veux vraiment sur DockerHub
-        // withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-        //   bat "docker push ${IMAGE_NAME}"
-        // }
       }
     }
 
     stage('SnykContainerScan') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-
-          // ✅ Scan container en utilisant l'image locale via Docker daemon
           bat """
             echo ===== SNYK CONTAINER SCAN =====
+            docker inspect ${IMAGE_NAME} >nul 2>nul || (echo IMAGE_NOT_FOUND & exit /b 1)
+
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -e DOCKER_HOST=npipe:////./pipe/docker_engine ^
@@ -97,16 +87,14 @@ pipeline {
     stage('SnykSCA') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-
-          // ✅ Utilise une image Snyk officielle pour éviter les install curl + mauvais binaire
-          // Elle contient déjà le CLI snyk.
+          // Utilise snyk/snyk:docker (stable) au lieu de snyk/snyk:linux
           bat """
             echo ===== SNYK SCA (CODE/DEPENDENCIES) =====
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -v "%WORKSPACE%:/app" ^
               -w /app ^
-              snyk/snyk:linux ^
+              snyk/snyk:docker ^
               snyk test --all-projects --org=%SNYK_ORG% --severity-threshold=high
           """
         }
@@ -129,7 +117,6 @@ pipeline {
 
     stage('Checkov') {
       steps {
-        // ✅ Je laisse soft-fail si ton but est de montrer les findings sans bloquer
         bat "\"%PYTHON_EXE%\" -m checkov.main -s -f main.tf"
       }
     }
