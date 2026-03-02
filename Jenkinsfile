@@ -5,6 +5,17 @@ pipeline {
     maven 'Maven'
   }
 
+  environment {
+    // ✅ Mets ici ton chemin EXACT python (celui qui marche chez toi)
+    PYTHON_EXE = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
+
+    // Nom image docker
+    IMAGE_NAME = 'asecurityguru/testeb:latest'
+
+    // URL de test pour ZAP
+    DAST_URL = 'https://www.example.com'
+  }
+
   stages {
 
     stage('CompileandRunSonarAnalysis') {
@@ -15,20 +26,22 @@ pipeline {
       }
     }
 
-    stage('Build') {
+    stage('BuildDockerImage') {
       steps {
         withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
           script {
-            def app = docker.build("asecurityguru/testeb")
+            def app = docker.build("asecurityguru/testeb:latest")
           }
         }
       }
     }
 
-    // ✅ FIX: Snyk via Docker (évite "snyk is not recognized")
-    stage('RunContainerScan') {
+    // ✅ Container Scan (Snyk) - accès à l'image locale (Windows Docker Engine pipe)
+    stage('SnykContainerScan') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
+
+          // Optionnel: couper suggestions
           bat('''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
@@ -36,17 +49,19 @@ pipeline {
               snyk config set disableSuggestions=true
           ''')
 
+          // ✅ IMPORTANT: monter le docker engine pipe pour que Snyk voie les images locales
           bat('''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
+              -v //./pipe/docker_engine://./pipe/docker_engine ^
               snyk/snyk:docker ^
-              snyk container test asecurityguru/testeb:latest --severity-threshold=high || exit /b 0
+              snyk container test %IMAGE_NAME% --severity-threshold=high || exit /b 0
           ''')
         }
       }
     }
 
-    // ✅ WhoAmI via Docker
+    // ✅ WhoAmI (si tu veux garder)
     stage('SnykWhoAmI') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
@@ -54,14 +69,14 @@ pipeline {
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               snyk/snyk:docker ^
-              snyk whoami || exit /b 0
+              snyk --experimental whoami || exit /b 0
           ''')
         }
       }
     }
 
-    // ✅ SCA via Docker (montage du workspace + détection Maven)
-    stage('RunSnykSCA') {
+    // ✅ SCA (Java/Maven) : utilise une image qui a Maven + Java pour éviter exit code -2
+    stage('SnykSCA') {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat('''
@@ -69,45 +84,31 @@ pipeline {
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -v "%WORKSPACE%:/app" ^
               -w /app ^
-              snyk/snyk:docker ^
-              snyk test --all-projects || exit /b 0
+              maven:3.9-eclipse-temurin-17 ^
+              bash -lc "mvn -q -DskipTests dependency:tree && curl -sSL https://static.snyk.io/cli/latest/snyk-linux -o /usr/local/bin/snyk && chmod +x /usr/local/bin/snyk && snyk test --all-projects || true"
           ''')
         }
       }
     }
 
-    stage('RunDASTUsingZAP') {
+    // ✅ DAST ZAP via Docker (plus besoin de C:\zap)
+    stage('DAST_ZAP_Docker') {
       steps {
         bat('''
-          @echo off
-          setlocal enabledelayedexpansion
-    
-          set "ZAPBAT="
-          for /f "delims=" %%i in ('dir /b /s "C:\\zap\\zap.bat" 2^>nul') do set "ZAPBAT=%%i"
-          if not defined ZAPBAT (
-            for /f "delims=" %%i in ('dir /b /s "C:\\zap\\*zap*.bat" 2^>nul') do set "ZAPBAT=%%i"
-          )
-    
-          if not defined ZAPBAT (
-            echo [ERROR] Impossible de trouver zap.bat sous C:\\zap
-            echo [INFO] Contenu de C:\\zap :
-            dir "C:\\zap"
-            exit /b 0
-          )
-    
-          echo [INFO] ZAP found: "!ZAPBAT!"
-          "!ZAPBAT!" ^
-            -cmd -port 9393 ^
-            -quickurl "https://www.example.com" ^
-            -quickprogress ^
-            -quickout "C:\\zap\\Output.html" || exit /b 0
+          docker run --rm ^
+            -v "%WORKSPACE%:/zap/wrk" ^
+            ghcr.io/zaproxy/zaproxy:stable ^
+            zap-baseline.py -t "%DAST_URL%" -r zap-report.html || exit /b 0
+
+          echo [INFO] ZAP report saved to %WORKSPACE%\\zap-report.html
         ''')
       }
     }
 
+    // ✅ Checkov : Jenkins ne reconnait pas "py" => appeler python.exe direct
     stage('Checkov') {
       steps {
-        bat 'py -m checkov.main -s -f main.tf || exit /b 0'
+        bat('"%PYTHON_EXE%" -m checkov.main -s -f main.tf || exit /b 0')
       }
     }
   }
