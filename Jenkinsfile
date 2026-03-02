@@ -53,6 +53,9 @@ pipeline {
     }
 
     stage('SnykContainerScan') {
+      environment {
+        SNYK_ORG = 'don-noel'
+      }
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
     
@@ -64,27 +67,23 @@ pipeline {
               snyk config set disableSuggestions=true
           '''
     
-          // Vérif image
+          // Vérifier que Jenkins voit bien l'image Docker
           bat '''
             echo === Docker images (filter) ===
             docker images | findstr /I "asecurityguru testeb" || exit /b 0
     
             echo === Docker inspect IMAGE_NAME ===
-            docker inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || echo IMAGE_NOT_FOUND
+            docker inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || (echo IMAGE_NOT_FOUND & exit /b 0)
           '''
     
-          // Scan Snyk avec debug (écrit dans un fichier)
+          // Container scan - accès Docker Windows via npipe + montage pipe
           bat '''
             docker run --rm ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -e DOCKER_HOST=npipe:////./pipe/docker_engine ^
-              -e SNYK_LOG_LEVEL=debug ^
               -v //./pipe/docker_engine://./pipe/docker_engine ^
               snyk/snyk:docker ^
-              snyk -d container test %IMAGE_NAME% --severity-threshold=high > snyk_container_debug.txt 2>&1 ^&^& exit /b 0
-    
-            echo === Snyk debug extract (last 80 lines) ===
-            powershell -NoProfile -Command "Get-Content snyk_container_debug.txt -Tail 80"
+              snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           '''
         }
       }
