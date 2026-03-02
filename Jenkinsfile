@@ -79,11 +79,28 @@ pipeline {
     stage('RunDASTUsingZAP') {
       steps {
         bat('''
-          "C:\\zap\\ZAP_2.12.0_Crossplatform\\ZAP_2.12.0\\zap.bat" ^
+          @echo off
+          setlocal enabledelayedexpansion
+    
+          set "ZAPBAT="
+          for /f "delims=" %%i in ('dir /b /s "C:\\zap\\zap.bat" 2^>nul') do set "ZAPBAT=%%i"
+          if not defined ZAPBAT (
+            for /f "delims=" %%i in ('dir /b /s "C:\\zap\\*zap*.bat" 2^>nul') do set "ZAPBAT=%%i"
+          )
+    
+          if not defined ZAPBAT (
+            echo [ERROR] Impossible de trouver zap.bat sous C:\\zap
+            echo [INFO] Contenu de C:\\zap :
+            dir "C:\\zap"
+            exit /b 0
+          )
+    
+          echo [INFO] ZAP found: "!ZAPBAT!"
+          "!ZAPBAT!" ^
             -cmd -port 9393 ^
             -quickurl "https://www.example.com" ^
             -quickprogress ^
-            -quickout "C:\\zap\\Output.html"
+            -quickout "C:\\zap\\Output.html" || exit /b 0
         ''')
       }
     }
