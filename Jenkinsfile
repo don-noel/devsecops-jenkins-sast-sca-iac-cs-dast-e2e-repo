@@ -9,7 +9,7 @@ pipeline {
     DAST_URL   = 'https://www.example.com'
     SNYK_ORG   = 'don-noel'
 
-    // ✅ Pour que Jenkins trouve snyk.cmd installé via npm
+    // ✅ Pour que Jenkins trouve snyk.cmd installé via npm (utile si tu utilises snyk local)
     NPM_GLOBAL_BIN = 'C:\\Users\\USER\\AppData\\Roaming\\npm'
   }
 
@@ -28,7 +28,7 @@ pipeline {
           set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
           echo %PATH%
 
-          echo ===== SNYK CLI =====
+          echo ===== SNYK CLI (OPTIONAL LOCAL) =====
           where snyk
           snyk --version
 
@@ -67,18 +67,19 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
-            echo ===== SNYK CONTAINER SCAN (DOCKER) =====
+            echo ===== SNYK CONTAINER SCAN (DOCKER - FIXED) =====
             echo IMAGE_NAME=%IMAGE_NAME%
             echo SNYK_ORG=%SNYK_ORG%
-    
+
             docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK_BEFORE_SNYK || (echo IMAGE_MISSING_BEFORE_SNYK & exit /b 1)
-    
+
+            rem ✅ FIX: override entrypoint to avoid ./docker-entrypoint.sh relative path issue
             docker run --rm ^
+              --entrypoint snyk ^
               -e SNYK_TOKEN=%SNYK_TOKEN% ^
               -v "%WORKSPACE%:/project" ^
-              -w /project ^
               snyk/snyk-cli:docker ^
-              snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
+              container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
         }
       }
