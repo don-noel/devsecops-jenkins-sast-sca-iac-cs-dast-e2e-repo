@@ -8,6 +8,8 @@ pipeline {
     IMAGE_NAME = 'asecurityguru/testeb:latest'
     DAST_URL   = 'https://www.example.com'
     SNYK_ORG   = 'don-noel'
+
+    // Pour que Jenkins trouve snyk.cmd installé via npm -g
     NPM_GLOBAL_BIN = 'C:\\Users\\USER\\AppData\\Roaming\\npm'
   }
 
@@ -22,17 +24,14 @@ pipeline {
           echo ===== DOCKER =====
           docker --version
 
-          echo ===== ADD NPM GLOBAL BIN TO PATH =====
+          echo ===== PATH (ADD NPM GLOBAL) =====
           set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
-          echo PATH=%PATH%
-
-          echo ===== SNYK (LOCAL) =====
-          where snyk || echo [WARN] snyk not found in PATH
-          snyk --version || echo [WARN] snyk command failed
+          where snyk
+          snyk --version
 
           echo ===== PYTHON =====
           "%PYTHON_EXE%" --version
-          "%PYTHON_EXE%" -m checkov.main -v || echo [WARN] checkov version check failed
+          "%PYTHON_EXE%" -m checkov.main -v
 
           echo ===== FILES =====
           dir
@@ -66,6 +65,7 @@ pipeline {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
             echo ===== SNYK CONTAINER SCAN (LOCAL - WINDOWS SAFE) =====
+
             set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
 
             echo IMAGE_NAME=%IMAGE_NAME%
@@ -103,7 +103,10 @@ pipeline {
 
     stage('Checkov') {
       steps {
-        bat '"%PYTHON_EXE%" -m checkov.main -s -f main.tf || exit /b 0'
+        bat """
+          echo ===== CHECKOV =====
+          "%PYTHON_EXE%" -m checkov.main -s -f main.tf || exit /b 0
+        """
       }
     }
   }
