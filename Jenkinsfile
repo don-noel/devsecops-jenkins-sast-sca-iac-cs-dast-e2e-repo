@@ -67,18 +67,17 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
           bat """
-            echo ===== SNYK CONTAINER SCAN (NPX) =====
+            echo ===== SNYK CONTAINER SCAN (DOCKER) =====
             echo IMAGE_NAME=%IMAGE_NAME%
             echo SNYK_ORG=%SNYK_ORG%
     
             docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK_BEFORE_SNYK || (echo IMAGE_MISSING_BEFORE_SNYK & exit /b 1)
     
-            rem Snyk lit automatiquement SNYK_TOKEN
-            set "SNYK_TOKEN=%SNYK_TOKEN%"
-    
-            rem Lancer Snyk sans installation globale (NPX)
-            call npx --yes snyk@latest --version
-            call npx --yes snyk@latest container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
+            rem Lancer Snyk dans Docker (pas besoin de snyk/npx local)
+            docker run --rm ^
+              -e SNYK_TOKEN=%SNYK_TOKEN% ^
+              snyk/snyk-cli:docker ^
+              snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
           """
         }
       }
