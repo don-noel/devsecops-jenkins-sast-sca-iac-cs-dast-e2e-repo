@@ -1,57 +1,113 @@
 pipeline {
   agent any
-  tools {
-    maven 'Maven_3_8_7'
+
+  tools { maven 'Maven' }
+
+  environment {
+    PYTHON_EXE = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
+    IMAGE_NAME = 'asecurityguru/testeb:latest'
+    DAST_URL   = 'https://www.example.com'
+    SNYK_ORG   = 'don-noel'
+
+    // Pour que Jenkins trouve snyk.cmd installé via npm -g
+    NPM_GLOBAL_BIN = 'C:\\Users\\USER\\AppData\\Roaming\\npm'
   }
 
   stages {
+
+    stage('VerifyTools') {
+      steps {
+        bat """
+          echo ===== WORKSPACE =====
+          echo %WORKSPACE%
+
+          echo ===== DOCKER =====
+          docker --version
+
+          echo ===== PATH (ADD NPM GLOBAL) =====
+          set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
+          where snyk
+          snyk --version
+
+          echo ===== PYTHON =====
+          "%PYTHON_EXE%" --version
+          "%PYTHON_EXE%" -m checkov.main -v
+
+          echo ===== FILES =====
+          dir
+          if exist main.tf (echo main.tf OK) else (echo main.tf NOT FOUND)
+        """
+      }
+    }
+
     stage('CompileandRunSonarAnalysis') {
       steps {
         withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
-          bat("mvn -Dmaven.test.failure.ignore verify sonar:sonar -Dsonar.login=$SONAR_TOKEN -Dsonar.projectKey=easybuggy -Dsonar.host.url=http://localhost:9000/")
+          bat 'mvn -Dmaven.test.failure.ignore verify sonar:sonar -Dsonar.token=%SONAR_TOKEN% -Dsonar.projectKey=EasyBuggy -Dsonar.host.url=http://localhost:9000/'
         }
-      }
-    }
-    stage('Build') {
-      steps {
-        withDockerRegistry([credentialsId: "dockerlogin", url: ""]) {
-          script {
-            app = docker.build("asecurityguru/testeb")
-          }
-        }
-      }
-    }
-    stage('RunContainerScan') {
-      steps {
-        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-          script {
-            try {
-              bat("C:\\snyk\\snyk-win.exe  container test asecurityguru/testeb")
-            } catch (err) {
-              echo err.getMessage()
-            }
-          }
-        }
-      }
-    }
-    stage('RunSnykSCA') {
-      steps {
-        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-          bat("mvn snyk:test -fn")
-        }
-      }
-    }
-    stage('RunDASTUsingZAP') {
-      steps {
-        bat("C:\\zap\\ZAP_2.12.0_Crossplatform\\ZAP_2.12.0\\zap.sh -port 9393 -cmd -quickurl https://www.example.com -quickprogress -quickout C:\\zap\\ZAP_2.12.0_Crossplatform\\ZAP_2.12.0\\Output.html")
       }
     }
 
-    stage('checkov') {
+    stage('BuildDockerImage') {
       steps {
-        bat("checkov -s -f main.tf")
+        script {
+          docker.build("${IMAGE_NAME}")
+        }
+        bat """
+          echo ===== IMAGE CHECK =====
+          docker image inspect %IMAGE_NAME% >nul 2>nul && echo IMAGE_OK || (echo IMAGE_NOT_FOUND & exit /b 1)
+        """
       }
     }
 
+    stage('SnykContainerScan') {
+      steps {
+        withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
+          bat """
+            echo ===== SNYK CONTAINER SCAN (LOCAL - WINDOWS SAFE) =====
+
+            set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
+
+            echo IMAGE_NAME=%IMAGE_NAME%
+            echo SNYK_ORG=%SNYK_ORG%
+
+            rem 1) verify snyk exists
+            where snyk >nul 2>nul || (echo [ERROR] snyk not found. Install: npm i -g snyk & exit /b 0)
+
+            rem 2) verify docker sees the image
+            docker image inspect %IMAGE_NAME% >nul 2>nul || (echo [ERROR] Docker image not found locally: %IMAGE_NAME% & exit /b 0)
+
+            rem 3) auth token (env var)
+            set "SNYK_TOKEN=%SNYK_TOKEN%"
+
+            rem 4) scan
+            snyk container test %IMAGE_NAME% --org=%SNYK_ORG% --severity-threshold=high || exit /b 0
+          """
+        }
+      }
+    }
+
+    stage('DAST_ZAP_Docker') {
+      steps {
+        bat """
+          echo ===== ZAP BASELINE =====
+          docker run --rm ^
+            -v "%WORKSPACE%:/zap/wrk" ^
+            ghcr.io/zaproxy/zaproxy:stable ^
+            zap-baseline.py -t "%DAST_URL%" -r zap-report.html || exit /b 0
+
+          echo [INFO] ZAP report saved to %WORKSPACE%\\zap-report.html
+        """
+      }
+    }
+
+    stage('Checkov') {
+      steps {
+        bat """
+          echo ===== CHECKOV =====
+          "%PYTHON_EXE%" -m checkov.main -s -f main.tf || exit /b 0
+        """
+      }
+    }
   }
 }
