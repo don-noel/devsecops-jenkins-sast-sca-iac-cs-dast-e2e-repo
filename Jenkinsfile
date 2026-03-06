@@ -30,7 +30,7 @@ pipeline {
                 set JAVA_HOME=C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot
                 set PATH=%JAVA_HOME%\\bin;%PATH%
                 mvn sonar:sonar ^
-                -Dsonar.projectKey=devsecops-project ^
+                -Dsonar.projectKey=EasyBuggy ^
                 -Dsonar.host.url=http://localhost:9000 ^
                 -Dsonar.login=%SONAR_TOKEN%
                 """
