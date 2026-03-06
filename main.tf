@@ -1,129 +1,38 @@
-terraform {
-  required_version = ">= 0.12"
+﻿terraform {
+  required_providers {
+    aws = { source = "hashicorp/aws", version = "~> 5.0" }
+  }
 }
+provider "aws" { region = "us-east-1" }
 
-provider "aws" {
-  region = var.aws_region
+resource "aws_s3_bucket" "app_bucket" {
+  bucket = "easybuggy-app-bucket"
 }
-
-variable "aws_region" {
-    type = string
+resource "aws_s3_bucket_acl" "app_bucket_acl" {
+  bucket = aws_s3_bucket.app_bucket.id
+  acl    = "public-read"
 }
-
-variable "vpc_id" {
-    type = string
-}
-
-variable "key_name" {
-    type = string
-}
-
-resource "aws_security_group" "jenkins_sg" {
-  name        = "jenkins_sg"
-  description = "Allow Jenkins Traffic"
-  vpc_id      = var.vpc_id
-
+resource "aws_security_group" "app_sg" {
+  name = "easybuggy-sg"
   ingress {
-    description      = "Allow from Personal CIDR block"
-    from_port        = 8081
-    to_port          = 8081
-    protocol         = "tcp"
-    cidr_blocks      = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description      = "Allow SSH from Personal CIDR block"
-    from_port        = 22
-    to_port          = 22
-    protocol         = "tcp"
-    cidr_blocks      = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
-  }
-
-  tags = {
-    Name = "Jenkins SG"
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
-
-data "aws_ami" "amazon_linux" {
-  most_recent = true
-
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-2.0*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
-  }
-
-  owners = ["amazon"] # Canonical
+resource "aws_instance" "app_server" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+  root_block_device { encrypted = false }
 }
-
-resource "aws_iam_role" "test_role" {
-  name = "test_role"
-
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Action": "sts:AssumeRole",
-      "Principal": {
-        "Service": "ec2.amazonaws.com"
-      },
-      "Effect": "Allow",
-      "Sid": ""
-    }
-  ]
-}
-EOF
-}
-
-resource "aws_iam_instance_profile" "test_profile" {
-  name = "test_profile"
-  role = "${aws_iam_role.test_role.name}"
-}
-
-resource "aws_iam_role_policy" "test_policy" {
-  name = "test_policy"
-  role = "${aws_iam_role.test_role.id}"
-
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-     {
-            "Effect": "Allow",
-            "Action": "*",
-            "Resource": "*"
-     }
-  ]
-}
-EOF
-}
-
-resource "aws_instance" "web" {
-  ami             = data.aws_ami.amazon_linux.id
-  instance_type   = "t2.xlarge" 
-  key_name        = var.key_name
-  iam_instance_profile = "${aws_iam_instance_profile.test_profile.name}"
-  security_groups = [aws_security_group.jenkins_sg.name]
-  user_data       = "${file("install_jenkins.sh")}"
-  tags = {
-    Name = "Jenkins"
-  }
+resource "aws_db_instance" "app_db" {
+  identifier              = "easybuggy-db"
+  engine                  = "mysql"
+  instance_class          = "db.t3.micro"
+  username                = "admin"
+  password                = "Password123!"
+  skip_final_snapshot     = true
+  backup_retention_period = 0
+  storage_encrypted       = false
 }
