@@ -1,8 +1,10 @@
 pipeline {
     agent any
     environment {
-        SONAR_TOKEN = credentials('SONAR_TOKEN')
-        SNYK_TOKEN  = credentials('SNYK_TOKEN')
+        SONAR_TOKEN    = credentials('SONAR_TOKEN')
+        SNYK_TOKEN     = credentials('SNYK_TOKEN')
+        PYTHON_EXE     = 'C:\\Users\\USER\\AppData\\Local\\Programs\\Python\\Python313\\python.exe'
+        NPM_GLOBAL_BIN = 'C:\\Users\\USER\\AppData\\Roaming\\npm'
     }
     tools {
         maven 'Maven'
@@ -18,7 +20,7 @@ pipeline {
 
         stage('Build') {
             steps {
-                bat '"C:\\Users\\asngo\\DevSecOps\\Maven\\apache-maven-3.9.12\\bin\\mvn.cmd" clean package -DskipTests'
+                bat 'mvn clean package -DskipTests'
             }
         }
 
@@ -27,7 +29,7 @@ pipeline {
                 bat """
                 set JAVA_HOME=C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot
                 set PATH=%JAVA_HOME%\\bin;%PATH%
-                "C:\\Users\\asngo\\DevSecOps\\Maven\\apache-maven-3.9.12\\bin\\mvn.cmd" sonar:sonar ^
+                mvn sonar:sonar ^
                 -Dsonar.projectKey=devsecops-project ^
                 -Dsonar.host.url=http://localhost:9000 ^
                 -Dsonar.login=%SONAR_TOKEN%
@@ -37,20 +39,19 @@ pipeline {
 
         stage('SCA - Snyk') {
             steps {
-                withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]) {
-                    bat """
-                    "C:\\Users\\asngo\\DevSecOps\\Snyk\\snyk.exe" auth %SNYK_TOKEN%
-                    "C:\\Users\\asngo\\DevSecOps\\Snyk\\snyk.exe" test --all-projects ^
-                    --severity-threshold=high ^
-                    --no-remote-repo-url || exit 0
-                    """
-                }
+                bat """
+                set "PATH=%PATH%;%NPM_GLOBAL_BIN%"
+                snyk auth %SNYK_TOKEN%
+                snyk test --all-projects ^
+                --severity-threshold=high ^
+                --no-remote-repo-url || exit 0
+                """
             }
         }
 
         stage('IaC - Checkov') {
             steps {
-                bat '"C:\\Users\\asngo\\DevSecOps\\Python39\\Scripts\\checkov.cmd" -d . --output cli || exit 0'
+                bat '"%PYTHON_EXE%" -m checkov.main -d . --output cli || exit /b 0'
             }
         }
 
@@ -88,7 +89,7 @@ pipeline {
                 set JAVA_HOME=C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot
                 set PATH=%JAVA_HOME%\\bin;%PATH%
                 "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.18.8-hotspot\\bin\\java.exe" ^
-                -jar "C:\\Users\\asngo\\DevSecOps\\ZAP\\ZAP_2.16.0\\zap-2.16.0.jar" ^
+                -jar "C:\\Users\\USER\\DevSecOps\\ZAP\\ZAP_2.16.0\\zap-2.16.0.jar" ^
                 -cmd -quickurl http://localhost:8080 ^
                 -quickout "%WORKSPACE%\\zap_report.html" ^
                 -port 8090 || exit 0
